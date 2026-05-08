@@ -17,22 +17,25 @@ import imageio.v2 as imageio
 import numpy as np
 import torch
 
-from shared.data import simulate_episode
+from shared.data import simulate_episode, simulate_episode_noisy
 from shared.encoder import Encoder, Decoder, get_device
 from part1_pixel.train_pixel import PixelPredictor
 from part2_jepa.train_jepa import Predictor
 
 
-def load_pixel_model(device):
-    ckpt = torch.load("checkpoints/pixel.pt", map_location=device, weights_only=True)
+def load_pixel_model(device, noisy: bool = False):
+    path = "checkpoints/pixel_noisy.pt" if noisy else "checkpoints/pixel.pt"
+    ckpt = torch.load(path, map_location=device, weights_only=True)
     model = PixelPredictor().to(device)
     model.load_state_dict(ckpt["model"])
     return model
 
 
-def load_jepa_models(device):
-    j = torch.load("checkpoints/jepa.pt", map_location=device, weights_only=True)
-    d = torch.load("checkpoints/jepa_decoder.pt", map_location=device, weights_only=True)
+def load_jepa_models(device, noisy: bool = False):
+    j_path = "checkpoints/jepa_noisy.pt" if noisy else "checkpoints/jepa.pt"
+    d_path = "checkpoints/jepa_decoder_noisy.pt" if noisy else "checkpoints/jepa_decoder.pt"
+    j = torch.load(j_path, map_location=device, weights_only=True)
+    d = torch.load(d_path, map_location=device, weights_only=True)
     encoder = Encoder().to(device)
     encoder.load_state_dict(j["encoder"])
     predictor = Predictor().to(device)
@@ -64,15 +67,18 @@ def compose_row(frames: list[np.ndarray], gap: int = 8) -> np.ndarray:
     return np.concatenate(cols, axis=1)
 
 
-def render_comparison(num_frames: int = 80, seed: int = 7):
+def render_comparison(num_frames: int = 80, seed: int = 7, noisy: bool = False):
     device = get_device()
-    print(f"device: {device}")
+    print(f"device: {device}, noisy: {noisy}")
 
-    pixel_model = load_pixel_model(device)
-    encoder, predictor, decoder = load_jepa_models(device)
+    pixel_model = load_pixel_model(device, noisy=noisy)
+    encoder, predictor, decoder = load_jepa_models(device, noisy=noisy)
 
     rng = np.random.default_rng(seed)
-    episode = simulate_episode(steps=num_frames + 1, rng=rng)  # (T+1, H, W)
+    if noisy:
+        episode = simulate_episode_noisy(steps=num_frames + 1, rng=rng)
+    else:
+        episode = simulate_episode(steps=num_frames + 1, rng=rng)  # (T+1, H, W)
 
     out_frames = []
     for t in range(num_frames):
@@ -96,19 +102,23 @@ def render_comparison(num_frames: int = 80, seed: int = 7):
         out_frames.append((row * 255).clip(0, 255).astype(np.uint8))
 
     os.makedirs("part1_pixel/outputs", exist_ok=True)
-    gif_path = "part1_pixel/outputs/comparison.gif"
+    suffix = "_noisy" if noisy else ""
+    gif_path = f"part1_pixel/outputs/comparison{suffix}.gif"
     imageio.mimsave(gif_path, out_frames, duration=0.1, loop=0)
     print(f"wrote {gif_path}  ({len(out_frames)} frames)")
 
-    # Pick a frame that's near a wall (max ball x-position) for the static strip.
-    wall_step = int(np.argmax(np.abs(episode[:num_frames].sum(axis=1).argmax(axis=1) - 32)))
-    strip = out_frames[wall_step]
-    imageio.imwrite("part1_pixel/outputs/comparison.png", strip)
-    print(f"wrote part1_pixel/outputs/comparison.png  (frame {wall_step})")
+    # Pick a frame near the centre of the frame (most ambiguous future direction)
+    # so the static strip shows the strongest smear in the pixel-prediction panel.
+    centre_step = int(np.argmin(np.abs(episode[:num_frames].sum(axis=1).argmax(axis=1) - 32)))
+    strip = out_frames[centre_step]
+    png_path = f"part1_pixel/outputs/comparison{suffix}.png"
+    imageio.imwrite(png_path, strip)
+    print(f"wrote {png_path}  (frame {centre_step})")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--frames", type=int, default=80)
+    parser.add_argument("--noisy", action="store_true")
     args = parser.parse_args()
-    render_comparison(num_frames=args.frames)
+    render_comparison(num_frames=args.frames, noisy=args.noisy)

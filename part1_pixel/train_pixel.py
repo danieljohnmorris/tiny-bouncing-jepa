@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from shared.data import make_pairs
+from shared.data import make_pairs, make_pairs_noisy
 from shared.encoder import Encoder, Decoder, get_device
 
 
@@ -27,11 +27,14 @@ class PixelPredictor(nn.Module):
         return self.decoder(self.encoder(x))
 
 
-def train(steps: int = 2000, batch_size: int = 64, lr: float = 3e-4, seed: int = 0):
+def train(steps: int = 2000, batch_size: int = 64, lr: float = 3e-4, seed: int = 0, noisy: bool = False):
     device = get_device()
-    print(f"device: {device}")
+    print(f"device: {device}, noisy: {noisy}")
 
-    pairs = make_pairs(num_pairs=4096, seed=seed).to(device)  # (N, 2, 1, 64, 64)
+    if noisy:
+        pairs = make_pairs_noisy(num_pairs=4096, seed=seed).to(device)
+    else:
+        pairs = make_pairs(num_pairs=4096, seed=seed).to(device)
     print(f"pairs: {tuple(pairs.shape)}")
 
     model = PixelPredictor().to(device)
@@ -57,15 +60,17 @@ def train(steps: int = 2000, batch_size: int = 64, lr: float = 3e-4, seed: int =
             print(f"step {step + 1:>5d}  loss {loss.item():.5f}")
     print(f"trained in {time.time() - t0:.1f}s")
 
-    torch.save({"model": model.state_dict(), "losses": losses}, "checkpoints/pixel.pt")
-    print("saved checkpoints/pixel.pt")
+    out_path = "checkpoints/pixel_noisy.pt" if noisy else "checkpoints/pixel.pt"
+    torch.save({"model": model.state_dict(), "losses": losses}, out_path)
+    print(f"saved {out_path}")
     return model
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--steps", type=int, default=2000)
+    parser.add_argument("--noisy", action="store_true")
     args = parser.parse_args()
     import os
     os.makedirs("checkpoints", exist_ok=True)
-    train(steps=args.steps)
+    train(steps=args.steps, noisy=args.noisy)

@@ -27,7 +27,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from shared.data import make_pairs
+from shared.data import make_pairs, make_pairs_noisy
 from shared.encoder import Encoder, EMBED_DIM, get_device
 
 
@@ -65,11 +65,15 @@ def train(
     var_w: float = 25.0,
     cov_w: float = 1.0,
     seed: int = 0,
+    noisy: bool = False,
 ):
     device = get_device()
-    print(f"device: {device}")
+    print(f"device: {device}, noisy: {noisy}")
 
-    pairs = make_pairs(num_pairs=4096, seed=seed).to(device)
+    if noisy:
+        pairs = make_pairs_noisy(num_pairs=4096, seed=seed).to(device)
+    else:
+        pairs = make_pairs(num_pairs=4096, seed=seed).to(device)
     print(f"pairs: {tuple(pairs.shape)}")
 
     encoder = Encoder().to(device)
@@ -114,21 +118,23 @@ def train(
             )
     print(f"trained in {time.time() - t0:.1f}s")
 
+    out_path = "checkpoints/jepa_noisy.pt" if noisy else "checkpoints/jepa.pt"
     torch.save(
         {
             "encoder": encoder.state_dict(),
             "predictor": predictor.state_dict(),
             "losses": losses,
         },
-        "checkpoints/jepa.pt",
+        out_path,
     )
-    print("saved checkpoints/jepa.pt")
+    print(f"saved {out_path}")
     return encoder, predictor
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--steps", type=int, default=3000)
+    parser.add_argument("--noisy", action="store_true")
     args = parser.parse_args()
     os.makedirs("checkpoints", exist_ok=True)
-    train(steps=args.steps)
+    train(steps=args.steps, noisy=args.noisy)
