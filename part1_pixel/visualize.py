@@ -1,9 +1,11 @@
-"""Render side-by-side comparison of pixel-space prediction vs JEPA prediction.
+"""Render the pixel-space MSE smear demo.
 
 For a long bouncing-ball sequence, we predict the next frame at each step
-using:
-  1. The pixel-space baseline trained with MSE (blurry near walls)
-  2. The JEPA encoder + predictor + viz decoder (crisp, commits to a direction)
+using a pixel-space MSE baseline. At positions where the ball direction is
+ambiguous (mid-frame, single-frame input has no velocity info), the model is
+forced to predict the conditional mean - a blurry smear with two faint
+ghosts. This is the demonstration of LeCun's pixel-prediction-on-bimodal-
+futures argument; the JEPA architectural alternative is taken up in Part 3.
 
 Outputs:
   part1_pixel/outputs/comparison.gif  - animated comparison
@@ -18,9 +20,8 @@ import numpy as np
 import torch
 
 from shared.data import simulate_episode, simulate_episode_noisy
-from shared.encoder import Encoder, Decoder, get_device
+from shared.encoder import get_device
 from part1_pixel.train_pixel import PixelPredictor
-from part2_jepa.train_jepa import Predictor
 
 
 def load_pixel_model(device, noisy: bool = False):
@@ -29,20 +30,6 @@ def load_pixel_model(device, noisy: bool = False):
     model = PixelPredictor().to(device)
     model.load_state_dict(ckpt["model"])
     return model
-
-
-def load_jepa_models(device, noisy: bool = False):
-    j_path = "checkpoints/jepa_noisy.pt" if noisy else "checkpoints/jepa.pt"
-    d_path = "checkpoints/jepa_decoder_noisy.pt" if noisy else "checkpoints/jepa_decoder.pt"
-    j = torch.load(j_path, map_location=device, weights_only=True)
-    d = torch.load(d_path, map_location=device, weights_only=True)
-    encoder = Encoder().to(device)
-    encoder.load_state_dict(j["encoder"])
-    predictor = Predictor().to(device)
-    predictor.load_state_dict(j["predictor"])
-    decoder = Decoder().to(device)
-    decoder.load_state_dict(d["decoder"])
-    return encoder, predictor, decoder
 
 
 def upscale(img: np.ndarray, factor: int = 4) -> np.ndarray:
@@ -72,13 +59,12 @@ def render_comparison(num_frames: int = 80, seed: int = 7, noisy: bool = False):
     print(f"device: {device}, noisy: {noisy}")
 
     pixel_model = load_pixel_model(device, noisy=noisy)
-    encoder, predictor, decoder = load_jepa_models(device, noisy=noisy)
 
     rng = np.random.default_rng(seed)
     if noisy:
         episode = simulate_episode_noisy(steps=num_frames + 1, rng=rng)
     else:
-        episode = simulate_episode(steps=num_frames + 1, rng=rng)  # (T+1, H, W)
+        episode = simulate_episode(steps=num_frames + 1, rng=rng)
 
     out_frames = []
     for t in range(num_frames):
@@ -87,16 +73,12 @@ def render_comparison(num_frames: int = 80, seed: int = 7, noisy: bool = False):
 
         with torch.no_grad():
             x_pixel_pred = pixel_model(x_t).cpu().numpy()[0, 0]
-            z_t = encoder(x_t)
-            z_pred = predictor(z_t)
-            x_jepa_pred = decoder(z_pred).cpu().numpy()[0, 0]
 
         row = compose_row(
             [
                 upscale(episode[t]),
                 upscale(x_true),
                 upscale(x_pixel_pred),
-                upscale(x_jepa_pred),
             ]
         )
         out_frames.append((row * 255).clip(0, 255).astype(np.uint8))
