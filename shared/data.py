@@ -51,6 +51,39 @@ def simulate_episode(steps: int, rng: np.random.Generator) -> np.ndarray:
     return frames
 
 
+def make_action_triples(num_pairs: int, seed: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return (frames, actions) for action-conditioned training.
+
+    frames shape: (num_pairs, 2, 1, H, W) - (frame_t, frame_t+1) pairs.
+    actions shape: (num_pairs,) - direction at time t, -1 for left, +1 for right.
+    """
+    rng = np.random.default_rng(seed)
+    pairs = []
+    actions = []
+    while len(pairs) < num_pairs:
+        x = rng.uniform(BALL_RADIUS + 1, FRAME_SIZE - BALL_RADIUS - 1)
+        y = FRAME_SIZE // 2
+        vx = float(rng.choice([-SPEED, SPEED]))
+        frames = []
+        vxs = []
+        for _ in range(24):
+            frames.append(render_frame(x, y))
+            vxs.append(vx)
+            x_next = x + vx
+            if x_next - BALL_RADIUS < 0:
+                vx = abs(vx); x_next = x + vx
+            elif x_next + BALL_RADIUS >= FRAME_SIZE:
+                vx = -abs(vx); x_next = x + vx
+            x = x_next
+        for t in range(len(frames) - 1):
+            pairs.append(np.stack([frames[t], frames[t + 1]]))
+            actions.append(1.0 if vxs[t] > 0 else -1.0)
+            if len(pairs) >= num_pairs:
+                break
+    arr = np.stack(pairs)[:, :, None, :, :]
+    return torch.from_numpy(arr), torch.tensor(actions, dtype=torch.float32)
+
+
 def make_pairs(num_pairs: int, seed: int = 0) -> torch.Tensor:
     """Return tensor of shape (num_pairs, 2, 1, H, W) of (frame_t, frame_t+1) pairs."""
     rng = np.random.default_rng(seed)
